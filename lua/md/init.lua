@@ -6,20 +6,28 @@ local M = {}
 ---@field overlap integer reserved, unused for now
 
 ---@class md.Config
+---@field renderer "auto"|"mdimg"|"md2png" which backend; auto = mdimg if found else md2png
+---@field mdimg_cmd string mdimg binary, default "mdimg" (bun add -g mdimg)
+---@field css string mdimg css template for light theme
+---@field css_dark string mdimg css template for dark theme
 ---@field cmd? string md2png binary override; nil = bundled bin in stdpath(data)
 ---@field version? string pinned md2png release, default in md/bin.lua
 ---@field width integer image width px
----@field margin integer margin px
----@field pt integer base font size pt
+---@field margin integer margin px (md2png only)
+---@field pt integer base font size pt (md2png only)
 ---@field theme string "light"|"dark"
----@field extra_args string[] extra CLI args
+---@field extra_args string[] extra CLI args passed to the renderer
 ---@field output_dir string dir for tmp md/png
 ---@field open_cmd string how to open png, default "vsplit"
 ---@field pages md.PagesConfig
 M.config = {
+  renderer = "auto",
+  mdimg_cmd = "mdimg",
+  css = "github",
+  css_dark = "githubDark",
   cmd = nil,
   version = nil,
-  width = 1024,
+  width = 800,
   margin = 48,
   pt = 16,
   theme = "light",
@@ -155,7 +163,44 @@ function M.render(opts)
     return require("md.bin").bin_path()
   end
 
-  local function do_render(bin)
+  local function resolve_renderer()
+    if cfg.renderer == "mdimg" or (cfg.renderer == "auto" and vim.fn.executable(cfg.mdimg_cmd) == 1) then
+      return "mdimg"
+    end
+    return "md2png"
+  end
+
+  local function build_cmd(renderer, bin, tmp_md, tmp_png)
+    if renderer == "mdimg" then
+      local css = cfg.theme == "dark" and cfg.css_dark or cfg.css
+      local cmd = { bin, "-i", tmp_md, "-o", tmp_png, "-w", tostring(cfg.width), "--css", css }
+      for _, a in ipairs(cfg.extra_args) do
+        table.insert(cmd, a)
+      end
+      return cmd
+    end
+    local cmd = {
+      bin,
+      "-in",
+      tmp_md,
+      "-out",
+      tmp_png,
+      "-width",
+      tostring(cfg.width),
+      "-margin",
+      tostring(cfg.margin),
+      "-pt",
+      tostring(cfg.pt),
+      "-theme",
+      cfg.theme,
+    }
+    for _, a in ipairs(cfg.extra_args) do
+      table.insert(cmd, a)
+    end
+    return cmd
+  end
+
+  local function do_render(bin, renderer)
     local src_buf = vim.api.nvim_get_current_buf()
     local src_name = vim.api.nvim_buf_get_name(src_buf)
     local base = vim.fn.fnamemodify(src_name, ":t:r")
@@ -181,36 +226,19 @@ function M.render(opts)
       return
     end
 
-    local cmd = {
-      bin,
-      "-in",
-      tmp_md,
-      "-out",
-      tmp_png,
-      "-width",
-      tostring(cfg.width),
-      "-margin",
-      tostring(cfg.margin),
-      "-pt",
-      tostring(cfg.pt),
-      "-theme",
-      cfg.theme,
-    }
-    for _, a in ipairs(cfg.extra_args) do
-      table.insert(cmd, a)
-    end
+    local cmd = build_cmd(renderer, bin, tmp_md, tmp_png)
 
-    notify("rendering → " .. tmp_png)
+    notify(renderer .. " rendering → " .. tmp_png)
 
     vim.system(cmd, { text = true }, function(res)
       vim.schedule(function()
         if res.code ~= 0 then
           local err = (res.stderr or "") .. (res.stdout or "")
-          notify("md2png failed (" .. res.code .. "): " .. err, vim.log.levels.ERROR)
+          notify(renderer .. " failed (" .. res.code .. "): " .. err, vim.log.levels.ERROR)
           return
         end
         if vim.fn.filereadable(tmp_png) == 0 then
-          notify("md2png exit 0 but no png: " .. tmp_png, vim.log.levels.ERROR)
+          notify(renderer .. " exit 0 but no png: " .. tmp_png, vim.log.levels.ERROR)
           return
         end
         maybe_paginate(cfg, tmp_png, base)
@@ -218,9 +246,18 @@ function M.render(opts)
     end)
   end
 
+  local renderer = resolve_renderer()
+  if renderer == "mdimg" then
+    if vim.fn.executable(cfg.mdimg_cmd) == 0 then
+      notify("mdimg not found → bun add -g mdimg", vim.log.levels.ERROR)
+      return
+    end
+    do_render(cfg.mdimg_cmd, renderer)
+    return
+  end
   local bin = resolve_bin()
   if vim.fn.executable(bin) == 1 then
-    do_render(bin)
+    do_render(bin, renderer)
     return
   end
   -- custom cmd missing → hard error, no auto-download
@@ -234,7 +271,7 @@ function M.render(opts)
       notify("install failed: " .. (err or "unknown"), vim.log.levels.ERROR)
       return
     end
-    do_render(path)
+    do_render(path, "md2png")
   end)
 end
 

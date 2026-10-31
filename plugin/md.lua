@@ -25,5 +25,5 @@ end, {
   complete = function()
     return { "light", "dark" }
   end,
-  desc = "Render current markdown buffer to PNG (md2png) and open in split",
+  desc = "Render current markdown buffer to PNG and open in split",
 })
