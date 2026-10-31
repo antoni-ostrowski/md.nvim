@@ -29,7 +29,7 @@ require("md").setup({ renderer = "mdimg" })   -- or "md2png", "auto"
 `vim.pack`:
 
 ```lua
-vim.pack.add({ { src = "https://github.com/YOU/md.nvim" } })
+vim.pack.add({ { src = "https://github.com/antoni-ostrowski/md.nvim" } })
 require("md").setup({
   -- renderer = "auto", -- "mdimg" | "md2png"
   -- mdimg_cmd = "mdimg",
